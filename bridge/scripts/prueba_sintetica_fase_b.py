@@ -179,6 +179,43 @@ def _esperar(condicion, mensaje: str) -> None:
         raise ErrorPrueba(mensaje)
 
 
+def nuevo_batch_id() -> str:
+    """UUID nuevo por ejecución; evita reutilizar un lote previo."""
+    return str(uuid.uuid4())
+
+
+def _asegurar_no_activado(leer_active) -> None:
+    """Confirma que `active_migration` sigue sin activarse (mejor esfuerzo)."""
+    try:
+        activo = leer_active()
+    except Exception:
+        return  # no se pudo verificar; no enmascarar el fallo original
+    if activo.get("batch_id") is not None:
+        raise ErrorPrueba(
+            "active_migration fue activado durante la prueba; no debe ocurrir."
+        )
+
+
+def _sanitizar(texto) -> str:
+    """Elimina de un texto la URL de conexión, su contraseña y el token."""
+    resultado = str(texto)
+    for variable in ("NEON_DATABASE_URL", "BRIDGE_TOKEN"):
+        valor = os.environ.get(variable, "")
+        if valor:
+            resultado = resultado.replace(valor, "[oculto]")
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        url = os.environ.get("NEON_DATABASE_URL", "")
+        if url:
+            password = conninfo_to_dict(url).get("password")
+            if password:
+                resultado = resultado.replace(password, "[oculto]")
+    except Exception:
+        pass
+    return resultado
+
+
 # --------------------------------------------------------------------------
 # Blocos de la prueba
 # --------------------------------------------------------------------------
@@ -221,51 +258,58 @@ def ejecutar_prueba(
              "active_migration ya está activo; abortar.")
     log(f"[esquema] tablas OK; active_migration.batch_id={activo_antes.get('batch_id')}")
 
-    # 1) Crear lote (idempotente).
-    estado, datos = cliente.post("/import/batches", {
-        "batch_id": batch_id,
-        "spreadsheet_id": spreadsheet_id,
-        "notes": json.dumps({"fase": "B", "sintetica": True}),
-    })
-    _esperar(estado == 200 and datos.get("status") == "running",
-             f"Crear lote: estado={estado}, cuerpo={datos}.")
-    log(f"[lote] creado={datos.get('created')} id={batch_id}")
-
-    # 2) Enviar solo las filas sintéticas (2 Empresas + 2 Vehiculos).
-    for hoja, registros in filas.items():
-        estado, datos = cliente.post("/import/rows", {
-            "batch_id": batch_id, "sheet_name": hoja, "rows": registros,
+    try:
+        # 1) Crear lote (idempotente).
+        estado, datos = cliente.post("/import/batches", {
+            "batch_id": batch_id,
+            "spreadsheet_id": spreadsheet_id,
+            "notes": json.dumps({"fase": "B", "sintetica": True}),
         })
-        _esperar(estado == 200, f"Insertar {hoja}: estado={estado}, cuerpo={datos}.")
-        log(f"[filas] {hoja}: escritas={datos.get('rows_written')}")
+        _esperar(estado == 200 and datos.get("status") == "running",
+                 f"Crear lote: estado={estado}, cuerpo={datos}.")
+        log(f"[lote] creado={datos.get('created')} id={batch_id}")
 
-    # 3) `Usuarios` debe rechazarse.
-    estado, datos = cliente.post("/import/rows", {
-        "batch_id": batch_id,
-        "sheet_name": "Usuarios",
-        "rows": [{"source_row_number": 2, "payload": {"Correo": "no@importar"}}],
-    })
-    _esperar(estado == 400, f"Usuarios debía dar 400, dio {estado}.")
-    log("[exclusión] 'Usuarios' rechazada (400)")
+        # 2) Enviar solo las filas sintéticas (2 Empresas + 2 Vehiculos).
+        for hoja, registros in filas.items():
+            estado, datos = cliente.post("/import/rows", {
+                "batch_id": batch_id, "sheet_name": hoja, "rows": registros,
+            })
+            _esperar(estado == 200, f"Insertar {hoja}: estado={estado}, cuerpo={datos}.")
+            log(f"[filas] {hoja}: escritas={datos.get('rows_written')}")
 
-    # 4) Finalizar con las 17 hojas (0 salvo las usadas).
-    estado, datos = cliente.post(f"/import/batches/{batch_id}/finalize", {
-        "expected_row_counts": conteos,
-    })
-    _esperar(estado == 200 and datos.get("status") == "validated",
-             f"Finalizar: estado={estado}, cuerpo={datos}.")
-    _esperar(datos.get("row_counts") == conteos,
-             f"Conteos inesperados: {datos.get('row_counts')} != {conteos}.")
-    checksum = str(datos.get("checksum") or "")
-    _esperar(len(checksum) == 64, f"Checksum inválido: {checksum!r}.")
-    log(f"[finalize] validated; checksum={checksum[:12]}…; hojas={len(conteos)}")
+        # 3) `Usuarios` debe rechazarse.
+        estado, datos = cliente.post("/import/rows", {
+            "batch_id": batch_id,
+            "sheet_name": "Usuarios",
+            "rows": [{"source_row_number": 2, "payload": {"Correo": "no@importar"}}],
+        })
+        _esperar(estado == 400, f"Usuarios debía dar 400, dio {estado}.")
+        log("[exclusión] 'Usuarios' rechazada (400)")
 
-    # 5) Consultar estado final.
-    estado, datos = cliente.get(f"/import/batches/{batch_id}")
-    _esperar(estado == 200 and datos.get("status") == "validated",
-             f"Consultar lote: estado={estado}, cuerpo={datos}.")
-    _esperar(str(datos.get("checksum")) == checksum, "El checksum consultado no coincide.")
-    log("[estado] lote validated y checksum coincide")
+        # 4) Finalizar con las 17 hojas (0 salvo las usadas).
+        estado, datos = cliente.post(f"/import/batches/{batch_id}/finalize", {
+            "expected_row_counts": conteos,
+        })
+        _esperar(estado == 200 and datos.get("status") == "validated",
+                 f"Finalizar: estado={estado}, cuerpo={datos}.")
+        _esperar(datos.get("row_counts") == conteos,
+                 f"Conteos inesperados: {datos.get('row_counts')} != {conteos}.")
+        checksum = str(datos.get("checksum") or "")
+        _esperar(len(checksum) == 64, f"Checksum inválido: {checksum!r}.")
+        log(f"[finalize] validated; checksum={checksum[:12]}…; hojas={len(conteos)}")
+
+        # 5) Consultar estado final.
+        estado, datos = cliente.get(f"/import/batches/{batch_id}")
+        _esperar(estado == 200 and datos.get("status") == "validated",
+                 f"Consultar lote: estado={estado}, cuerpo={datos}.")
+        _esperar(str(datos.get("checksum")) == checksum,
+                 "El checksum consultado no coincide.")
+        log("[estado] lote validated y checksum coincide")
+    except Exception:
+        # Aunque la prueba falle (p. ej. conteo incorrecto), la migración no
+        # debe haberse activado.
+        _asegurar_no_activado(leer_active_migration)
+        raise
 
     # 6) `active_migration` no se activó.
     activo_despues = leer_active_migration()
@@ -324,13 +368,16 @@ def main(argv=None) -> int:
     try:
         resultado = ejecutar_prueba(
             cliente,
-            batch_id=str(uuid.uuid4()),
+            batch_id=nuevo_batch_id(),
             spreadsheet_id="PRUEBA-FASE-B",
             verificar_esquema=_verificar,
             leer_active_migration=_active,
         )
     except ErrorPrueba as error:
-        print(f"PRUEBA FALLIDA: {error}")
+        print(f"PRUEBA FALLIDA: {_sanitizar(error)}")
+        return 1
+    except Exception as error:  # noqa: BLE001
+        print(f"ERROR: {_sanitizar(type(error).__name__ + ': ' + str(error))}")
         return 1
     print("PRUEBA OK:", json.dumps(resultado, default=str, ensure_ascii=False))
     return 0
