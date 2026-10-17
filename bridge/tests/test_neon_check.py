@@ -18,6 +18,15 @@ def test_health_incluye_version(client):
     assert cuerpo["version"] == main.VERSION
 
 
+def test_health_expone_estado_db_sin_secretos(client):
+    respuesta = client.get("/health")
+    cuerpo = respuesta.json()
+    assert "database" in cuerpo
+    assert set(cuerpo["database"]) == {"checked", "connected", "tls_enabled"}
+    # No debe filtrar host, usuario, contraseña ni la URL.
+    assert URL not in respuesta.text
+
+
 def test_neon_check_sin_token_es_401(client):
     respuesta = client.get("/neon-check")
     assert respuesta.status_code == 401

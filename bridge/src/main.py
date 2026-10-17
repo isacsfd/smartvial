@@ -14,8 +14,10 @@ Todas las rutas de importación requieren la cabecera `X-Bridge-Token`.
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from uuid import UUID
 
+import asyncio
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -35,30 +37,11 @@ from .sheets import es_hoja_permitida, es_usuarios
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartvial.bridge")
 
-VERSION = "0.4.1"
+VERSION = "0.4.2"
 
-_settings_arranque = cargar_settings()
-_docs = "/docs" if docs_habilitados(_settings_arranque) else None
-
-app = FastAPI(
-    title="SmartVial Neon Bridge",
-    version=VERSION,
-    docs_url=_docs,
-    redoc_url="/redoc" if _docs else None,
-    openapi_url="/openapi.json" if _docs else None,
-)
-
-# Limita los bytes reales del cuerpo (incluye transferencia fragmentada), no
-# solo la cabecera Content-Length. Se evalúa por petición para respetar la
-# configuración vigente.
-app.add_middleware(
-    LimiteCuerpoMiddleware,
-    max_bytes_getter=lambda: cargar_settings().max_body_bytes,
-)
-
-
-def get_repo() -> PostgresRepository:
-    return PostgresRepository(construir_dsn(cargar_settings()))
+# Estado de la última comprobación de Neon (sin secretos). Se expone en /health
+# como sonda de preparación; no contiene host, usuario ni credenciales.
+_estado_neon: dict = {"checked": False, "connected": False, "tls_enabled": None}
 
 
 def _sanitizar_error(exc: Exception) -> str:
@@ -82,6 +65,62 @@ def _sanitizar_error(exc: Exception) -> str:
     return mensaje
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # En producción se hace una comprobación de arranque (con reintentos) para
+    # detectar fallos de conexión/TLS sin depender de una llamada autenticada.
+    if cargar_settings().produccion:
+        ultimo: Exception | None = None
+        for intento in range(3):
+            try:
+                resultado = comprobar_conexion_neon(construir_dsn(cargar_settings()))
+                _estado_neon.update(
+                    {
+                        "checked": True,
+                        "connected": bool(resultado.get("connected")),
+                        "tls_enabled": resultado.get("tls_enabled"),
+                    }
+                )
+                break
+            except Exception as exc:  # noqa: BLE001
+                ultimo = exc
+                if intento < 2:
+                    await asyncio.sleep(2)
+        else:
+            _estado_neon.update(
+                {"checked": True, "connected": False, "tls_enabled": None}
+            )
+            logger.error(
+                "Comprobación de arranque de Neon falló: %s", _sanitizar_error(ultimo)
+            )
+    yield
+
+
+_settings_arranque = cargar_settings()
+_docs = "/docs" if docs_habilitados(_settings_arranque) else None
+
+app = FastAPI(
+    title="SmartVial Neon Bridge",
+    version=VERSION,
+    docs_url=_docs,
+    redoc_url="/redoc" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+    lifespan=lifespan,
+)
+
+# Limita los bytes reales del cuerpo (incluye transferencia fragmentada), no
+# solo la cabecera Content-Length. Se evalúa por petición para respetar la
+# configuración vigente.
+app.add_middleware(
+    LimiteCuerpoMiddleware,
+    max_bytes_getter=lambda: cargar_settings().max_body_bytes,
+)
+
+
+def get_repo() -> PostgresRepository:
+    return PostgresRepository(construir_dsn(cargar_settings()))
+
+
 @app.exception_handler(Exception)
 async def error_interno(request, exc):  # pragma: no cover - defensivo
     logger.exception("Error no controlado en el puente.")
@@ -92,16 +131,32 @@ async def error_interno(request, exc):  # pragma: no cover - defensivo
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "smartvial-neon-bridge", "version": VERSION}
+    return {
+        "status": "ok",
+        "service": "smartvial-neon-bridge",
+        "version": VERSION,
+        "database": dict(_estado_neon),
+    }
 
 
 @app.get("/neon-check", dependencies=[Depends(requerir_token)])
 def neon_check():
     try:
-        return comprobar_conexion_neon(construir_dsn(cargar_settings()))
+        resultado = comprobar_conexion_neon(construir_dsn(cargar_settings()))
+        _estado_neon.update(
+            {
+                "checked": True,
+                "connected": bool(resultado.get("connected")),
+                "tls_enabled": resultado.get("tls_enabled"),
+            }
+        )
+        return resultado
     except HTTPException:
         raise
     except Exception as exc:
+        _estado_neon.update(
+            {"checked": True, "connected": False, "tls_enabled": None}
+        )
         # El detalle se registra en el servidor y queda saneado; el cliente
         # recibe un mensaje genérico sin credenciales ni trazas internas.
         logger.error("neon-check falló: %s", _sanitizar_error(exc))

@@ -15,7 +15,7 @@ Todas las rutas de importación exigen la cabecera `X-Bridge-Token`.
 | `POST` | `/import/batches/{batch_id}/finalize` | `{expected_row_counts, client_checksum?}` | Valida conteos, calcula checksum y sella en `validated`. |
 | `GET` | `/import/batches/{batch_id}` | — | Consulta estado del lote. |
 | `GET` | `/neon-check` | — | Verifica conexión PostgreSQL. |
-| `GET` | `/health` | — | Sonda de salud (sin token). |
+| `GET` | `/health` | — | Sonda de salud (sin token); incluye `database.{checked,connected,tls_enabled}`. |
 
 `.payload` es un objeto JSON cuyas claves son los encabezados de la hoja y cuyos
 valores son escalares (`string`, `number`, `boolean`, `null`). Las fechas se
@@ -78,6 +78,10 @@ certificados de Let's Encrypt, presentes en el bundle de certifi.
   certifi, para que `verify-full` no falle por el CA del `libpq` empaquetado.
 - `/neon-check` determina el TLS real con `pgconn.ssl_in_use` (no con
   `pg_stat_ssl`), robusto con el endpoint *pooled* de Neon.
+- En producción, al arrancar se ejecuta una comprobación de Neon (con
+  reintentos) y su resultado (solo booleanos, sin secretos) se publica en
+  `/health` como `database.{checked,connected,tls_enabled}`. Así la conexión
+  real se puede verificar sin token; `/neon-check` sigue requiriendo token.
 
 ## Hoja `Documentos` (encabezados)
 
