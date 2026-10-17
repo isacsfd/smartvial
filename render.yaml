@@ -1,0 +1,26 @@
+
+services:
+  - type: web
+    name: smartvial-neon-bridge
+    runtime: python
+    # Render construye y arranca desde el subdirectorio del puente.
+    rootDir: bridge
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn src.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Producción: deshabilita /docs, /redoc y /openapi.json.
+      - key: ENVIRONMENT
+        value: production
+      # TLS estricto: cifra y valida el certificado del servidor de Neon.
+      - key: PG_SSLMODE
+        value: verify-full
+      # libpq toma las CA del almacén del sistema (Neon usa Let's Encrypt).
+      - key: PG_SSLROOTCERT
+        value: system
+      # Secretos: se definen en el panel de Render, nunca en el repositorio.
+      - key: NEON_DATABASE_URL
+        sync: false
+      - key: BRIDGE_TOKEN
+        sync: false

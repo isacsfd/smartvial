@@ -1,0 +1,17 @@
+# Secretos y configuración local
+.env
+.env.*
+!.env.example
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Apps Script
+.clasp.json
