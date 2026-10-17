@@ -14,8 +14,16 @@ Todas las rutas de importación exigen la cabecera `X-Bridge-Token`.
 | `POST` | `/import/rows` | `{batch_id, sheet_name, rows:[{source_row_number, record_id?, company_id?, payload}]}` | Inserta/actualiza filas con UPSERT idempotente. |
 | `POST` | `/import/batches/{batch_id}/finalize` | `{expected_row_counts, client_checksum?}` | Valida conteos, calcula checksum y sella en `validated`. |
 | `GET` | `/import/batches/{batch_id}` | — | Consulta estado del lote. |
+| `GET` | `/import/batches/{batch_id}/rows` | `?sheet_name=&limite=` | Lectura de diagnóstico por `batch_id` (solo metadatos). |
 | `GET` | `/neon-check` | — | Verifica conexión PostgreSQL. |
 | `GET` | `/health` | — | Sonda de salud (sin token); incluye `database.{checked,connected,tls_enabled}`. |
+
+`GET /import/batches/{batch_id}/rows` es una lectura de diagnóstico **solo de
+metadatos**: usa el `batch_id` explícito (no depende de `active_migration`),
+limita las hojas a la lista autorizada (nunca `Usuarios`) y devuelve los
+conteos por hoja y, con `?sheet_name=` (y `?limite=`, 1..100), una muestra de
+`{source_row_number, claves, tiene_record_id, tiene_company_id}`. **Nunca
+devuelve valores del payload** ni secretos.
 
 `.payload` es un objeto JSON cuyas claves son los encabezados de la hoja y cuyos
 valores son escalares (`string`, `number`, `boolean`, `null`). Las fechas se

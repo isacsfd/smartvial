@@ -56,6 +56,35 @@ class FakeRepository:
             raise BatchNotFound("no existe")
         return {"batch_id": bid, **self.batches[bid]}
 
+    def resumen_filas_lote(self, batch_id, sheet_name, limite):
+        bid = str(batch_id)
+        if bid not in self.batches:
+            raise BatchNotFound("no existe")
+        conteos: dict[str, int] = {}
+        for (b, s, _rn) in self.rows:
+            if b == bid and s in HOJAS_PERMITIDAS:
+                conteos[s] = conteos.get(s, 0) + 1
+        resultado = {
+            "batch_id": bid,
+            "status": self.batches[bid]["status"],
+            "hojas": conteos,
+        }
+        if sheet_name is not None:
+            filas = [
+                {
+                    "source_row_number": int(rn),
+                    "claves": len(fila["payload"]),
+                    "tiene_record_id": bool(fila.get("record_id")),
+                    "tiene_company_id": bool(fila.get("company_id")),
+                }
+                for (b, s, rn), fila in self.rows.items()
+                if b == bid and s == sheet_name
+            ]
+            filas.sort(key=lambda x: x["source_row_number"])
+            resultado["sheet_name"] = sheet_name
+            resultado["filas"] = filas[: int(limite)]
+        return resultado
+
     def _verificar_activo(self, bid, para="escrituras"):
         if bid not in self.batches:
             raise BatchNotFound("no existe")

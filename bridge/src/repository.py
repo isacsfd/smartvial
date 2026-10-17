@@ -109,6 +109,56 @@ class PostgresRepository:
             raise BatchNotFound("El lote no existe.")
         return fila[0]
 
+    def resumen_filas_lote(
+        self, batch_id, sheet_name: str | None, limite: int
+    ) -> dict[str, Any]:
+        """Lectura de diagnóstico de un lote (solo metadatos, sin payloads).
+
+        No depende de `active_migration`: usa el `batch_id` explícito. Solo
+        devuelve los conteos por hoja de la lista blanca y, si se pide una
+        hoja concreta, una muestra mínima (número de fila y presencia de
+        identificadores/claves), nunca los valores del payload.
+        """
+        bid = str(batch_id)
+        with self._conectar() as conn:
+            with conn.cursor() as cur:
+                estado = self._estado_lote(cur, bid)
+                cur.execute(
+                    "SELECT sheet_name, count(*) FROM legacy_sheet_rows "
+                    "WHERE batch_id = %s GROUP BY sheet_name",
+                    (bid,),
+                )
+                conteos = {
+                    str(nombre): int(total)
+                    for nombre, total in cur.fetchall()
+                    if str(nombre) in _HOJAS_PERMITIDAS_SET
+                }
+                resultado: dict[str, Any] = {
+                    "batch_id": bid,
+                    "status": estado,
+                    "hojas": conteos,
+                }
+                if sheet_name is not None:
+                    cur.execute(
+                        "SELECT source_row_number, record_id, company_id, payload "
+                        "FROM legacy_sheet_rows "
+                        "WHERE batch_id = %s AND sheet_name = %s "
+                        "ORDER BY source_row_number LIMIT %s",
+                        (bid, sheet_name, int(limite)),
+                    )
+                    filas = [
+                        {
+                            "source_row_number": int(numero),
+                            "claves": len(payload) if isinstance(payload, dict) else 0,
+                            "tiene_record_id": bool(registro),
+                            "tiene_company_id": bool(empresa),
+                        }
+                        for numero, registro, empresa, payload in cur.fetchall()
+                    ]
+                    resultado["sheet_name"] = sheet_name
+                    resultado["filas"] = filas
+                return resultado
+
     def insertar_filas(
         self, batch_id, sheet_name: str, filas: Iterable[dict[str, Any]]
     ) -> int:

@@ -37,7 +37,10 @@ from .sheets import es_hoja_permitida, es_usuarios
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartvial.bridge")
 
-VERSION = "0.4.2"
+VERSION = "0.4.3"
+
+# Tope de filas de muestra para la lectura de diagnóstico (metadatos).
+_MAX_FILAS_DIAGNOSTICO = 100
 
 # Estado de la última comprobación de Neon (sin secretos). Se expone en /health
 # como sonda de preparación; no contiene host, usuario ni credenciales.
@@ -190,6 +193,38 @@ def consultar_lote(batch_id: UUID, repo: PostgresRepository = Depends(get_repo))
     except Exception:
         logger.exception("Fallo al consultar el lote.")
         raise HTTPException(status_code=503, detail="No se pudo consultar el lote.")
+
+
+@app.get(
+    "/import/batches/{batch_id}/rows",
+    dependencies=[Depends(requerir_token)],
+)
+def leer_filas_lote(
+    batch_id: UUID,
+    sheet_name: str | None = None,
+    limite: int = 5,
+    repo: PostgresRepository = Depends(get_repo),
+):
+    # Ruta de diagnóstico de solo lectura: lee un lote por `batch_id` explícito,
+    # sin depender de `active_migration`. Solo devuelve conteos por hoja de la
+    # lista autorizada y, si se pide, una muestra mínima sin payloads.
+    if sheet_name is not None:
+        if es_usuarios(sheet_name):
+            raise HTTPException(
+                status_code=400, detail="La hoja Usuarios no se consulta."
+            )
+        if not es_hoja_permitida(sheet_name):
+            raise HTTPException(status_code=400, detail="Hoja no permitida.")
+    if limite < 1 or limite > _MAX_FILAS_DIAGNOSTICO:
+        raise HTTPException(status_code=422, detail="Límite fuera de rango.")
+
+    try:
+        return repo.resumen_filas_lote(batch_id, sheet_name, limite)
+    except BatchNotFound:
+        raise HTTPException(status_code=404, detail="El lote no existe.")
+    except Exception:
+        logger.exception("Fallo al leer las filas del lote.")
+        raise HTTPException(status_code=503, detail="No se pudieron leer las filas.")
 
 
 @app.post("/import/rows", dependencies=[Depends(requerir_token)])
