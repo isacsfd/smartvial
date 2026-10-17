@@ -108,6 +108,8 @@ class FakeRepository:
         checksum = hashlib.sha256(material.encode("utf-8")).hexdigest()
 
         self.batches[bid]["status"] = "validated"
+        self.batches[bid]["checksum"] = checksum
+        self.batches[bid]["row_counts"] = esperados
         return {
             "batch_id": bid,
             "status": "validated",

@@ -181,6 +181,24 @@ La propuesta no usa JDBC, mantiene la exclusión de `Usuarios`, envía las 17
 hojas (con ceros), reintenta dividiendo ante `413` y valida los conteos contra
 el checksum calculado por el servidor.
 
+## Fase B — prueba sintética (`scripts/prueba_sintetica_fase_b.py`)
+
+Prueba el flujo completo con datos ficticios: 2 filas en `Empresas`, 2 en
+`Vehiculos` y 0 en las otras 15 hojas (17 en total). Verifica autenticación,
+creación del lote, envío de filas, rechazo de `Usuarios` (400), finalización,
+conteos, checksum y consulta de estado. Antes de escribir, **comprueba el
+esquema leyendo Neon**; si no puede (falta `NEON_DATABASE_URL`), se detiene sin
+enviar ninguna escritura.
+
+```bash
+export BRIDGE_URL="https://<servicio>.onrender.com"
+export BRIDGE_TOKEN="<token>"
+export NEON_DATABASE_URL="<url pooled de Neon>"   # para verificar el esquema
+
+python -m scripts.prueba_sintetica_fase_b --dry-run   # solo lectura
+python -m scripts.prueba_sintetica_fase_b             # ejecuta la prueba
+```
+
 ## Pruebas
 
 ```bash
