@@ -73,7 +73,9 @@ certificados de Let's Encrypt, presentes en el bundle de certifi.
 - Por defecto el puente usa `PG_SSLMODE=verify-full` y `PG_SSLROOTCERT=certifi`.
 - Un `sslmode` inseguro o desconocido (`disable`/`allow`/`prefer`) se eleva a
   `verify-full`; nunca se degrada ni se oculta un fallo de certificado.
-- `PG_SSLROOTCERT=system` delega en el almacén del SO; otra ruta se toma como PEM.
+- `PG_SSLROOTCERT` solo se respeta si apunta a un archivo PEM existente; en
+  cualquier otro caso (`system`, vacío o ruta inexistente) se usa el bundle de
+  certifi, para que `verify-full` no falle por el CA del `libpq` empaquetado.
 - `/neon-check` determina el TLS real con `pgconn.ssl_in_use` (no con
   `pg_stat_ssl`), robusto con el endpoint *pooled* de Neon.
 

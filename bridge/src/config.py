@@ -23,9 +23,16 @@ _DEFAULT_SSLROOTCERT = "certifi"
 
 
 def _resolver_sslrootcert(valor: str) -> str:
-    """Resuelve 'certifi'/'system'/ruta. Nunca devuelve un valor vacío."""
+    """Devuelve la ruta a la CA para verify-ca/verify-full.
+
+    - Ruta a un archivo PEM existente: se respeta tal cual.
+    - "certifi", "system", vacío o ruta inexistente: se usa el bundle de
+      certifi. Así funciona aunque Render conserve un `PG_SSLROOTCERT=system`
+      heredado, ya que el CA por defecto del libpq empaquetado no existe en el
+      runtime y haría fallar `verify-full`.
+    """
     valor = (valor or "").strip()
-    if valor and valor.lower() != "certifi":
+    if valor and os.path.isfile(valor):
         return valor
     try:
         import certifi
@@ -33,7 +40,7 @@ def _resolver_sslrootcert(valor: str) -> str:
         return certifi.where()
     except Exception:
         # Sin certifi, se delega en el almacén del sistema.
-        return "system"
+        return valor or "system"
 
 _DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MiB por petición
 _DEFAULT_MAX_ROWS_PER_REQUEST = 500  # el importador envía bloques de 100

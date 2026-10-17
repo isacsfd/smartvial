@@ -35,7 +35,7 @@ from .sheets import es_hoja_permitida, es_usuarios
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartvial.bridge")
 
-VERSION = "0.4.0"
+VERSION = "0.4.1"
 
 _settings_arranque = cargar_settings()
 _docs = "/docs" if docs_habilitados(_settings_arranque) else None
