@@ -16,9 +16,24 @@ from psycopg.conninfo import make_conninfo
 # cifra y además valida el certificado del servidor contra una CA de confianza.
 _SSLMODES_SEGUROS = frozenset({"require", "verify-ca", "verify-full"})
 _DEFAULT_SSLMODE = "verify-full"
-# libpq soporta `sslrootcert=system` (PostgreSQL >= 16): usa las CA del sistema.
-# Neon usa certificados de Let's Encrypt, presentes en el almacén del sistema.
-_DEFAULT_SSLROOTCERT = "system"
+# CA a usar con verify-ca/verify-full. "certifi" resuelve al bundle de CA que
+# incluye el propio wheel (portable en Render); "system" delega en el almacén
+# del SO; cualquier otro valor se trata como ruta a un archivo PEM.
+_DEFAULT_SSLROOTCERT = "certifi"
+
+
+def _resolver_sslrootcert(valor: str) -> str:
+    """Resuelve 'certifi'/'system'/ruta. Nunca devuelve un valor vacío."""
+    valor = (valor or "").strip()
+    if valor and valor.lower() != "certifi":
+        return valor
+    try:
+        import certifi
+
+        return certifi.where()
+    except Exception:
+        # Sin certifi, se delega en el almacén del sistema.
+        return "system"
 
 _DEFAULT_MAX_BODY_BYTES = 2 * 1024 * 1024  # 2 MiB por petición
 _DEFAULT_MAX_ROWS_PER_REQUEST = 500  # el importador envía bloques de 100
@@ -75,7 +90,7 @@ def cargar_settings() -> Settings:
         bridge_token=os.getenv("BRIDGE_TOKEN", "").strip(),
         database_url=os.getenv("NEON_DATABASE_URL", "").strip(),
         sslmode=sslmode,
-        sslrootcert=os.getenv("PG_SSLROOTCERT", "").strip() or _DEFAULT_SSLROOTCERT,
+        sslrootcert=_resolver_sslrootcert(os.getenv("PG_SSLROOTCERT", _DEFAULT_SSLROOTCERT)),
         connect_timeout=_entero("PG_CONNECT_TIMEOUT", 10),
         environment=os.getenv("ENVIRONMENT", "development").strip().lower() or "development",
         max_body_bytes=_entero("MAX_BODY_BYTES", _DEFAULT_MAX_BODY_BYTES),

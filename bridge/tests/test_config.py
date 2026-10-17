@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from src.config import cargar_settings, construir_dsn
@@ -19,7 +21,22 @@ def test_verify_full_por_defecto():
     assert s.sslmode == "verify-full"
     dsn = construir_dsn(s)
     assert "sslmode=verify-full" in dsn
-    assert "sslrootcert=system" in dsn
+    assert "sslrootcert=" in dsn
+
+
+def test_sslrootcert_por_defecto_es_archivo_existente():
+    # Debe resolver a un bundle real (certifi) y no a "system".
+    s = cargar_settings()
+    assert s.sslrootcert != "system"
+    assert os.path.isfile(s.sslrootcert)
+
+
+def test_sslrootcert_system_se_respeta(monkeypatch):
+    monkeypatch.setenv("PG_SSLMODE", "verify-full")
+    monkeypatch.setenv("PG_SSLROOTCERT", "system")
+    s = cargar_settings()
+    assert s.sslrootcert == "system"
+    assert "sslrootcert=system" in construir_dsn(s)
 
 
 def test_sslmode_inseguro_no_se_degrada(monkeypatch):

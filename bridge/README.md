@@ -63,18 +63,19 @@ fragmentada. El cuerpo admitido se reproduce intacto a FastAPI.
 
 ## Verificación TLS (`sslmode=verify-full`)
 
-`psycopg` usa `libpq`, que soporta `sslmode=verify-full` y `sslrootcert=system`
-(PostgreSQL ≥ 16). Neon usa certificados de Let's Encrypt, presentes en el
-almacén de CA del sistema, por lo que `verify-full` es viable en Render y
-`/neon-check` puede confirmar `tls_enabled: true`.
+`psycopg` usa `libpq`, que soporta `sslmode=verify-full`. Para validar el
+certificado del servidor se necesita una CA: el puente usa por defecto el bundle
+de **certifi** (`certifi.where()`), incluido en el wheel, de modo que
+`verify-full` funciona de forma portable en Render sin depender del CA por
+defecto del `libpq` empaquetado (que puede no existir en el runtime). Neon usa
+certificados de Let's Encrypt, presentes en el bundle de certifi.
 
-- Por defecto el puente usa `PG_SSLMODE=verify-full` y `PG_SSLROOTCERT=system`.
+- Por defecto el puente usa `PG_SSLMODE=verify-full` y `PG_SSLROOTCERT=certifi`.
 - Un `sslmode` inseguro o desconocido (`disable`/`allow`/`prefer`) se eleva a
   `verify-full`; nunca se degrada ni se oculta un fallo de certificado.
-- Si se prefiere un archivo de CA propio, `PG_SSLROOTCERT=/ruta/ca.crt`.
-- Si el almacén del sistema no estuviera disponible, `PG_SSLMODE=require` sigue
-  cifrando (pero no autentica el servidor); es el único modo de respaldo y no se
-  elige automáticamente.
+- `PG_SSLROOTCERT=system` delega en el almacén del SO; otra ruta se toma como PEM.
+- `/neon-check` determina el TLS real con `pgconn.ssl_in_use` (no con
+  `pg_stat_ssl`), robusto con el endpoint *pooled* de Neon.
 
 ## Hoja `Documentos` (encabezados)
 
@@ -115,7 +116,7 @@ Valores en `render.yaml`; los secretos se definen en el panel del servicio
 | `BRIDGE_TOKEN` | Panel de Render | Token largo y aleatorio compartido con Apps Script. |
 | `ENVIRONMENT` | `render.yaml` | `production` para ocultar OpenAPI. |
 | `PG_SSLMODE` | `render.yaml` | `verify-full`. |
-| `PG_SSLROOTCERT` | `render.yaml` | `system` (CA del sistema). |
+| `PG_SSLROOTCERT` | `render.yaml` | `certifi` (CA del wheel). |
 
 Render despliega el subdirectorio `bridge` (`rootDir`) y arranca con
 `uvicorn src.main:app`. El secreto nunca está en el repositorio: `NEON_DATABASE_URL`

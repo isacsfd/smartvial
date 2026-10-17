@@ -16,9 +16,10 @@ services:
       # TLS estricto: cifra y valida el certificado del servidor de Neon.
       - key: PG_SSLMODE
         value: verify-full
-      # libpq toma las CA del almacén del sistema (Neon usa Let's Encrypt).
+      # Bundle de CA incluido en el wheel (portable en Render). Evita depender
+      # del CA por defecto del libpq empaquetado, que no existe en el runtime.
       - key: PG_SSLROOTCERT
-        value: system
+        value: certifi
       # Secretos: se definen en el panel de Render, nunca en el repositorio.
       - key: NEON_DATABASE_URL
         sync: false

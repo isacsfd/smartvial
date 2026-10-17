@@ -16,13 +16,13 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-import psycopg
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
 from .body_limit import LimiteCuerpoMiddleware
 from .config import Settings, cargar_settings, construir_dsn, docs_habilitados
 from .models import BatchRequest, FinalizeRequest, RowsRequest, validar_payload
+from .neon import comprobar_conexion_neon
 from .repository import (
     BatchConflict,
     BatchNotFound,
@@ -35,12 +35,14 @@ from .sheets import es_hoja_permitida, es_usuarios
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartvial.bridge")
 
+VERSION = "0.4.0"
+
 _settings_arranque = cargar_settings()
 _docs = "/docs" if docs_habilitados(_settings_arranque) else None
 
 app = FastAPI(
     title="SmartVial Neon Bridge",
-    version="0.3.0",
+    version=VERSION,
     docs_url=_docs,
     redoc_url="/redoc" if _docs else None,
     openapi_url="/openapi.json" if _docs else None,
@@ -59,6 +61,27 @@ def get_repo() -> PostgresRepository:
     return PostgresRepository(construir_dsn(cargar_settings()))
 
 
+def _sanitizar_error(exc: Exception) -> str:
+    """Mensaje de error sin secretos (oculta la URL y la contraseña)."""
+    mensaje = f"{type(exc).__name__}: {exc}"
+    settings = cargar_settings()
+    secretos = [settings.bridge_token]
+    if settings.database_url:
+        secretos.append(settings.database_url)
+        try:
+            from psycopg.conninfo import conninfo_to_dict
+
+            password = conninfo_to_dict(settings.database_url).get("password")
+            if password:
+                secretos.append(password)
+        except Exception:
+            pass
+    for secreto in secretos:
+        if secreto:
+            mensaje = mensaje.replace(secreto, "[oculto]")
+    return mensaje
+
+
 @app.exception_handler(Exception)
 async def error_interno(request, exc):  # pragma: no cover - defensivo
     logger.exception("Error no controlado en el puente.")
@@ -69,26 +92,19 @@ async def error_interno(request, exc):  # pragma: no cover - defensivo
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "smartvial-neon-bridge"}
+    return {"status": "ok", "service": "smartvial-neon-bridge", "version": VERSION}
 
 
 @app.get("/neon-check", dependencies=[Depends(requerir_token)])
 def neon_check():
     try:
-        with psycopg.connect(construir_dsn(cargar_settings())) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT current_database(), current_user, ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()")
-                fila = cur.fetchone()
-        return {
-            "connected": True,
-            "database": fila[0],
-            "user": fila[1],
-            "tls_enabled": bool(fila[2]) if len(fila) > 2 else None,
-            "tls_required": True,
-        }
+        return comprobar_conexion_neon(construir_dsn(cargar_settings()))
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        # El detalle se registra en el servidor y queda saneado; el cliente
+        # recibe un mensaje genérico sin credenciales ni trazas internas.
+        logger.error("neon-check falló: %s", _sanitizar_error(exc))
         raise HTTPException(
             status_code=503,
             detail="No se pudo verificar la conexión con PostgreSQL.",
