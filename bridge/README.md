@@ -175,7 +175,26 @@ Usa el **mismo** token en Render (`BRIDGE_TOKEN`) y en Apps Script
    - `SMARTVIAL_BRIDGE_URL` = `https://<servicio>.onrender.com`
    - `SMARTVIAL_BRIDGE_TOKEN` = mismo `BRIDGE_TOKEN` del puente.
 3. Ejecutar `inspeccionarEncabezadosSnapshotPuente()` para revisar encabezados.
+   Devuelve por hoja `{existe, estado, encabezados}` con `estado` en
+   `OK` / `FALTA_HOJA` / `SIN_ENCABEZADOS` (solo lee la fila 1, sin escribir).
 4. Ejecutar `importarSnapshotNeonPuente()` desde el editor (cuenta propietaria).
+
+### Importación limitada (prueba controlada)
+
+Para importar como máximo N filas de datos por hoja (sin contar encabezados):
+
+```javascript
+importarSnapshotNeonPuente({LIMITE_FILAS: 5});
+```
+
+- Sin `LIMITE_FILAS` (o `null`/`""`) importa la hoja completa.
+- El límite se aplica por igual a las 17 hojas permitidas; si una hoja tiene
+  menos filas, se procesan solo las disponibles.
+- Devuelve `informePorHoja` con `encontradas`, `seleccionadas` y `enviadas`
+  por hoja. Las filas totalmente vacías se cuentan como seleccionadas pero no
+  se envían (comportamiento previo).
+- `LIMITE_FILAS` debe ser entero positivo; `0`, negativos, decimales, texto o
+  booleanos lanzan error antes de crear el lote.
 
 La propuesta no usa JDBC, mantiene la exclusión de `Usuarios`, envía las 17
 hojas (con ceros), reintenta dividiendo ante `413` y valida los conteos contra
