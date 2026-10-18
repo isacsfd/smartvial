@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 HOJA_EXCLUIDA = "Usuarios"
+HOJA_EMPRESAS = "Empresas"
 
 # Lista exacta de hojas operativas permitidas para el snapshot.
 HOJAS_PERMITIDAS = (
@@ -30,6 +31,10 @@ _HOJAS_PERMITIDAS_SET = frozenset(HOJAS_PERMITIDAS)
 
 def es_usuarios(nombre: str) -> bool:
     return str(nombre).strip().casefold() == HOJA_EXCLUIDA.casefold()
+
+
+def es_empresas(nombre: str) -> bool:
+    return str(nombre).strip() == HOJA_EMPRESAS
 
 
 def es_hoja_permitida(nombre: str) -> bool:

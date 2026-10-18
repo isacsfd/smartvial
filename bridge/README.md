@@ -15,6 +15,7 @@ Todas las rutas de importación exigen la cabecera `X-Bridge-Token`.
 | `POST` | `/import/batches/{batch_id}/finalize` | `{expected_row_counts, client_checksum?}` | Valida conteos, calcula checksum y sella en `validated`. |
 | `GET` | `/import/batches/{batch_id}` | — | Consulta estado del lote. |
 | `GET` | `/import/batches/{batch_id}/rows` | `?sheet_name=&limite=` | Lectura de diagnóstico por `batch_id` (solo metadatos). |
+| `GET` | `/reads/{sheet_name}` | `?company_id=&batch_id?` | Lectura operativa (payloads) del lote activo; `batch_id` opcional para pruebas. |
 | `GET` | `/neon-check` | — | Verifica conexión PostgreSQL. |
 | `GET` | `/health` | — | Sonda de salud (sin token); incluye `database.{checked,connected,tls_enabled}`. |
 
@@ -24,6 +25,42 @@ limita las hojas a la lista autorizada (nunca `Usuarios`) y devuelve los
 conteos por hoja y, con `?sheet_name=` (y `?limite=`, 1..100), una muestra de
 `{source_row_number, claves, tiene_record_id, tiene_company_id}`. **Nunca
 devuelve valores del payload** ni secretos.
+
+## Lectura operativa por el puente (Apps Script)
+
+`GET /reads/{sheet_name}?company_id=<ID>` devuelve las filas de una hoja/empresa
+del lote activo (`active_migration`), ordenadas por `source_row_number` y con el
+`payload` JSONB intacto. Es autenticada (`X-Bridge-Token`) y de solo lectura.
+`batch_id` es opcional y sirve para pruebas controladas sin activar
+`active_migration`.
+
+- `400` hoja no permitida, `Usuarios` o `Empresas` (ambas permanecen en Sheets).
+- `401` sin token.
+- `404` `batch_id` inexistente.
+- `409` si no hay lote activo (no devuelve una lista vacía).
+- `200` con `{batch_id, sheet_name, company_id, rows:[{source_row_number,payload}]}`.
+
+En Apps Script, `LecturaPuenteNeon.js` implementa el cliente y conserva el
+formato `[{fila, mapa}]` de los lectores actuales (orden de filas y conversión
+de encabezados incluidos). Propiedades requeridas:
+
+- `SMARTVIAL_PG_READS_ENABLED` — interruptor existente. Debe permanecer en
+  `false` hasta validar; al activarlo, `leerFilasEmpresa_` usa el puente.
+- `SMARTVIAL_BRIDGE_URL` — `https://<servicio>.onrender.com`.
+- `SMARTVIAL_BRIDGE_TOKEN` — mismo token del puente.
+
+Prueba directa del puente (sin Apps Script, sin flag y sin activar
+`active_migration`), usando el `batch_id` validado:
+
+```powershell
+Invoke-RestMethod "https://<servicio>.onrender.com/reads/Vehiculos?company_id=<ID_EMPRESA>&batch_id=cfe4ddc2-907f-4d13-93fa-50c6a973db90" `
+  -Headers @{ "X-Bridge-Token" = $env:SMARTVIAL_BRIDGE_TOKEN }
+```
+
+La prueba de integración completa (Apps Script → puente) requiere activar
+`SMARTVIAL_PG_READS_ENABLED` y queda pendiente de autorización. El cliente no
+convierte errores en listas vacías: HTTP no 2xx, JSON inválido o fallo de red
+lanzan error.
 
 `.payload` es un objeto JSON cuyas claves son los encabezados de la hoja y cuyos
 valores son escalares (`string`, `number`, `boolean`, `null`). Las fechas se

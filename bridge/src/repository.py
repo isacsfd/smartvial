@@ -31,6 +31,10 @@ class CountMismatch(Exception):
     """Los conteos persistidos no coinciden con los esperados."""
 
 
+class NoActiveMigration(Exception):
+    """No hay un lote activo para las lecturas operativas."""
+
+
 def calcular_checksum_global(hashes_por_hoja: dict[str, str]) -> str:
     """SHA-256 estable sobre las huellas por hoja, ordenadas por nombre."""
     material = "|".join(
@@ -158,6 +162,45 @@ class PostgresRepository:
                     resultado["sheet_name"] = sheet_name
                     resultado["filas"] = filas
                 return resultado
+
+    def leer_filas_empresa(
+        self, sheet_name: str, company_id: str, batch_id=None
+    ) -> dict[str, Any]:
+        """Lectura operativa de una hoja/empresa en el lote activo o indicado.
+
+        Solo lectura. Si no hay lote activo, lanza `NoActiveMigration` en vez
+        de devolver una lista vacía (no se ocultan fallos como datos vacíos).
+        """
+        with self._conectar() as conn:
+            with conn.cursor() as cur:
+                if batch_id is None:
+                    cur.execute(
+                        "SELECT batch_id FROM active_migration WHERE singleton = TRUE"
+                    )
+                    fila = cur.fetchone()
+                    if not fila or fila[0] is None:
+                        raise NoActiveMigration("No hay un lote activo.")
+                    bid = str(fila[0])
+                else:
+                    bid = str(batch_id)
+                    self._estado_lote(cur, bid)
+
+                cur.execute(
+                    "SELECT source_row_number, payload FROM legacy_sheet_rows "
+                    "WHERE batch_id = %s AND sheet_name = %s AND company_id = %s "
+                    "ORDER BY source_row_number",
+                    (bid, sheet_name, company_id),
+                )
+                filas = [
+                    {"source_row_number": int(numero), "payload": payload}
+                    for numero, payload in cur.fetchall()
+                ]
+        return {
+            "batch_id": bid,
+            "sheet_name": sheet_name,
+            "company_id": company_id,
+            "rows": filas,
+        }
 
     def insertar_filas(
         self, batch_id, sheet_name: str, filas: Iterable[dict[str, Any]]

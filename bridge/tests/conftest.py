@@ -20,6 +20,7 @@ from src.repository import (  # noqa: E402
     BatchConflict,
     BatchNotFound,
     CountMismatch,
+    NoActiveMigration,
 )
 from src.sheets import HOJAS_PERMITIDAS  # noqa: E402
 
@@ -32,6 +33,7 @@ class FakeRepository:
     def __init__(self) -> None:
         self.batches: dict[str, dict] = {}
         self.rows: dict[tuple[str, str, int], dict] = {}
+        self.active_batch: str | None = None
 
     def crear_o_reanudar_lote(self, batch_id, spreadsheet_id, notes):
         bid = str(batch_id)
@@ -84,6 +86,31 @@ class FakeRepository:
             resultado["sheet_name"] = sheet_name
             resultado["filas"] = filas[: int(limite)]
         return resultado
+
+    def leer_filas_empresa(self, sheet_name, company_id, batch_id=None):
+        bid = str(batch_id) if batch_id is not None else self.active_batch
+        if bid is None:
+            raise NoActiveMigration("No hay un lote activo.")
+        if bid not in self.batches:
+            raise BatchNotFound("no existe")
+        empresa = str(company_id).upper()
+        filas = [
+            {
+                "source_row_number": int(rn),
+                "payload": fila["payload"],
+            }
+            for (b, s, rn), fila in self.rows.items()
+            if b == bid
+            and s == sheet_name
+            and str(fila.get("company_id") or "").upper() == empresa
+        ]
+        filas.sort(key=lambda x: x["source_row_number"])
+        return {
+            "batch_id": bid,
+            "sheet_name": sheet_name,
+            "company_id": empresa,
+            "rows": filas,
+        }
 
     def _verificar_activo(self, bid, para="escrituras"):
         if bid not in self.batches:

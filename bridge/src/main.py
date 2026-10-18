@@ -29,15 +29,16 @@ from .repository import (
     BatchConflict,
     BatchNotFound,
     CountMismatch,
+    NoActiveMigration,
     PostgresRepository,
 )
 from .security import get_settings, requerir_token
-from .sheets import es_hoja_permitida, es_usuarios
+from .sheets import es_empresas, es_hoja_permitida, es_usuarios
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("smartvial.bridge")
 
-VERSION = "0.4.3"
+VERSION = "0.5.0"
 
 # Tope de filas de muestra para la lectura de diagnóstico (metadatos).
 _MAX_FILAS_DIAGNOSTICO = 100
@@ -224,6 +225,41 @@ def leer_filas_lote(
         raise HTTPException(status_code=404, detail="El lote no existe.")
     except Exception:
         logger.exception("Fallo al leer las filas del lote.")
+        raise HTTPException(status_code=503, detail="No se pudieron leer las filas.")
+
+
+@app.get("/reads/{sheet_name}", dependencies=[Depends(requerir_token)])
+def leer_filas_empresa(
+    sheet_name: str,
+    company_id: str,
+    batch_id: UUID | None = None,
+    repo: PostgresRepository = Depends(get_repo),
+):
+    # Lectura operativa autenticada. Usa el lote activo (`active_migration`);
+    # `batch_id` permite pruebas de solo lectura sin activarlo. Mantiene el
+    # filtro por empresa, el orden por fila y las hojas autorizadas.
+    if (
+        es_usuarios(sheet_name)
+        or es_empresas(sheet_name)
+        or not es_hoja_permitida(sheet_name)
+    ):
+        raise HTTPException(status_code=400, detail="Hoja no permitida.")
+
+    empresa = company_id.strip().upper()
+    if not empresa:
+        raise HTTPException(status_code=422, detail="company_id es obligatorio.")
+
+    try:
+        return repo.leer_filas_empresa(sheet_name, empresa, batch_id)
+    except BatchNotFound:
+        raise HTTPException(status_code=404, detail="El lote no existe.")
+    except NoActiveMigration:
+        raise HTTPException(
+            status_code=409,
+            detail="No hay un lote activo para lectura.",
+        )
+    except Exception:
+        logger.exception("Fallo al leer filas operativas.")
         raise HTTPException(status_code=503, detail="No se pudieron leer las filas.")
 
 
